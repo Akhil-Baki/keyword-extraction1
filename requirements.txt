@@ -1,0 +1,8 @@
+streamlit
+yake
+rake-nltk
+spacy
+nltk
+scikit-learn
+PyPDF2
+pandas
