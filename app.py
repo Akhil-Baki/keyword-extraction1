@@ -31,17 +31,6 @@ def rake_extract(text, top_n=15):
     phrases = r.get_ranked_phrases()
     return phrases[:top_n]
 
-def spacy_np_extract(text, top_n=15):
-    doc = nlp(text)
-    # collect noun chunks and lemmatize them for normalization
-    chunks = []
-    for chunk in doc.noun_chunks:
-        lemma = " ".join([token.lemma_ for token in chunk if not token.is_punct and not token.is_space])
-        if lemma:
-            chunks.append(lemma.lower())
-    # preserve order & uniqueness
-    unique = list(dict.fromkeys(chunks))
-    return unique[:top_n]
 
 def tfidf_extract(text, top_n=15):
     # simple TF-IDF on the single document: we split into sentences as "corpus"
@@ -68,7 +57,6 @@ def hybrid_extract(text, top_n=20):
     sources = []
     sources += yake_extract(text, top_n * 2)
     sources += rake_extract(text, top_n * 2)
-    sources += spacy_np_extract(text, top_n * 2)
     sources += tfidf_extract(text, top_n * 2)
     sources += rule_freq_extract(text, top_n * 2)
     # scoring: earlier occurrences get slightly higher weight (rank-based)
@@ -175,8 +163,6 @@ if st.button("🔍 Extract Keywords"):
                 kws = yake_extract(doc_text, top_n=num)
             elif method == "RAKE":
                 kws = rake_extract(doc_text, top_n=num)
-            elif method == "spaCy Noun Phrases":
-                kws = spacy_np_extract(doc_text, top_n=num)
             elif method == "TF-IDF":
                 kws = tfidf_extract(doc_text, top_n=num)
             elif method == "Rule Frequency":
@@ -193,4 +179,5 @@ if st.button("🔍 Extract Keywords"):
         df = pd.DataFrame({"keyword": kws})
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button(label="⬇️ Download CSV", data=csv, file_name=f"{download_name}.csv", mime="text/csv")
+
 
