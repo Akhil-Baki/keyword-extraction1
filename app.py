@@ -1,183 +1,99 @@
-# app.py
 import streamlit as st
-import yake
-from rake_nltk import Rake
 import nltk
+from rake_nltk import Rake
+import yake
 from sklearn.feature_extraction.text import TfidfVectorizer
-from collections import Counter
-import tempfile
-import PyPDF2
-import pandas as pd
+import numpy as np
 
-# ---------------------------
-# Setup (downloads once)
-# ---------------------------
+# -----------------------------
+# NLTK downloads (fixed)
+# -----------------------------
 nltk.download("punkt")
 nltk.download("stopwords")
+nltk.download("punkt_tab")   # 🔥 Required fix for RAKE
 
 
-
-# ---------------------------
-# Extraction Functions
-# ---------------------------
-def yake_extract(text, top_n=15):
-    kw_extractor = yake.KeywordExtractor(top=top_n, stopwords=None)
-    kw = kw_extractor.extract_keywords(text)
-    return [k for k, score in kw]
-
-def rake_extract(text, top_n=15):
+# -----------------------------
+# RULE-BASED: RAKE
+# -----------------------------
+def rake_extract(text, top_n=10):
     r = Rake()
     r.extract_keywords_from_text(text)
-    phrases = r.get_ranked_phrases()
-    return phrases[:top_n]
+    scores = r.get_ranked_phrases_with_scores()
+    return [kw for score, kw in scores[:top_n]]
 
 
-def tfidf_extract(text, top_n=15):
-    # simple TF-IDF on the single document: we split into sentences as "corpus"
-    sentences = [s for s in text.split(".") if s.strip()]
-    if not sentences:
-        sentences = [text]
-    vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1,2), max_features=500)
-    X = vectorizer.fit_transform(sentences)
-    # compute average tfidf across sentences for each term
-    scores = X.mean(axis=0).A1
-    terms = vectorizer.get_feature_names_out()
-    term_scores = sorted(zip(terms, scores), key=lambda x: x[1], reverse=True)
-    return [t for t, s in term_scores[:top_n]]
+# -----------------------------
+# RULE-BASED: YAKE
+# -----------------------------
+def yake_extract(text, top_n=10):
+    y = yake.KeywordExtractor(lan="en", n=1, top=top_n)
+    return [kw for kw, score in y.extract_keywords(text)]
 
-def rule_freq_extract(text, top_n=15):
-    # rule-based frequency after cleaning using spaCy tokenization
-    doc = nlp(text.lower())
-    tokens = [t.lemma_ for t in doc if t.is_alpha and not t.is_stop and len(t) > 2]
-    most = [w for w, c in Counter(tokens).most_common(top_n)]
-    return most
 
-def hybrid_extract(text, top_n=20):
-    # combine many sources, score by occurrence and method-rank
-    sources = []
-    sources += yake_extract(text, top_n * 2)
-    sources += rake_extract(text, top_n * 2)
-    sources += tfidf_extract(text, top_n * 2)
-    sources += rule_freq_extract(text, top_n * 2)
-    # scoring: earlier occurrences get slightly higher weight (rank-based)
-    score = {}
-    for src in sources:
-        # normalize
-        k = src.strip().lower()
-        if not k:
-            continue
-        score[k] = score.get(k, 0) + 1
-    # sort by score then alphabetically
-    ranked = sorted(score.items(), key=lambda x: (-x[1], x[0]))
-    return [k for k, s in ranked][:top_n]
+# -----------------------------
+# ML-BASED: TF-IDF
+# -----------------------------
+def tfidf_extract(text, top_n=10):
+    vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
+    X = vectorizer.fit_transform([text])
+    scores = X.toarray()[0]
 
-# ---------------------------
-# Utility: PDF -> text
-# ---------------------------
-def extract_text_from_pdf(uploaded_file):
-    try:
-        reader = PyPDF2.PdfReader(uploaded_file)
-        text = []
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text.append(page_text)
-        return "\n".join(text)
-    except Exception:
-        return ""
+    indices = np.argsort(scores)[::-1][:top_n]
+    features = vectorizer.get_feature_names_out()
 
-# ---------------------------
-# Streamlit UI + Styling
-# ---------------------------
-st.set_page_config(page_title="Keyword Extractor (Stable)", layout="wide", page_icon="🔎")
+    return [features[i] for i in indices]
 
-st.markdown(
-    """
-    <style>
-    body { background: linear-gradient(135deg,#0f2027,#2c5364); color: #f7f7fb; }
-    .title { font-size:2.6rem; font-weight:800; text-align:center;
-             background: -webkit-linear-gradient(#fff,#d0c4ff);
-             -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom:8px;}
-    .subtitle { text-align:center; color:#dfe9f3; margin-bottom:22px;}
-    .glass { background: rgba(255,255,255,0.06); padding:22px; border-radius:14px; border:1px solid rgba(255,255,255,0.06);
-            box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
-    .kw { display:inline-block; padding:8px 12px; margin:6px; border-radius:12px; background: rgba(255,255,255,0.06); }
-    footer { visibility: hidden; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
-st.markdown("<div class='title'>🔎 Keyword Extraction — Stable Edition</div>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>YAKE • RAKE • spaCy • TF–IDF • Rule-based frequency • Hybrid</div>", unsafe_allow_html=True)
+# -----------------------------
+# HYBRID METHOD (RAKE + YAKE + TF-IDF)
+# -----------------------------
+def hybrid_extract(text, top_n=10):
+    rake_kw = rake_extract(text, top_n * 2)
+    yake_kw = yake_extract(text, top_n * 2)
+    tfidf_kw = tfidf_extract(text, top_n * 2)
 
-col1, col2 = st.columns([2, 1])
+    merged = rake_kw + yake_kw + tfidf_kw
+    unique = list(dict.fromkeys(merged))  # remove duplicates
+    return unique[:top_n]
 
-with col1:
-    st.markdown("<div class='glass'>", unsafe_allow_html=True)
-    uploaded = st.file_uploader("Upload a PDF (optional) or paste text below", type=["pdf", "txt", "md"])
-    text_input = st.text_area("Or paste / type your article/report here", height=300)
 
-    if uploaded is not None:
-        if uploaded.type == "application/pdf":
-            text_from_pdf = extract_text_from_pdf(uploaded)
-            if text_from_pdf.strip():
-                st.success("PDF successfully read. Text loaded into the editor.")
-                # prefill the text area only if empty to avoid overriding user's typed text
-                if not text_input.strip():
-                    text_input = text_from_pdf
-            else:
-                st.warning("Could not extract text from PDF. Please paste text manually.")
-        else:
-            # text file
-            bytes_data = uploaded.read()
-            try:
-                text_from_file = bytes_data.decode("utf-8")
-            except:
-                text_from_file = ""
-            if text_from_file:
-                if not text_input.strip():
-                    text_input = text_from_file
+# -----------------------------
+# STREAMLIT UI
+# -----------------------------
+st.set_page_config(page_title="Keyword Extraction App", page_icon="📰", layout="wide")
 
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with col2:
-    st.markdown("<div class='glass'>", unsafe_allow_html=True)
-    st.write("### Settings")
-    method = st.selectbox("Extraction method", ["Hybrid (recommended)", "YAKE", "RAKE", "spaCy Noun Phrases", "TF-IDF", "Rule Frequency"])
-    num = st.slider("Number of keywords", 5, 50, 20)
-    st.write("---")
-    st.write("Download results:")
-    download_name = st.text_input("CSV filename (without extension)", value="keywords")
-    st.markdown("</div>", unsafe_allow_html=True)
+st.markdown("""
+    <h1 style='text-align:center;color:#4A90E2;'>📰 Keyword Extraction for Investigative Journalism</h1>
+    <p style='text-align:center;color:#999;font-size:18px;'>
+        Extract meaningful keywords using Rule-based + ML methods.
+    </p>
+""", unsafe_allow_html=True)
 
 st.write("")
 
-if st.button("🔍 Extract Keywords"):
-    doc_text = text_input.strip()
-    if not doc_text:
-        st.warning("Please paste text or upload a PDF.")
+text = st.text_area("Enter your text here:", height=250, placeholder="Paste an article, investigation report, or long document...")
+
+method = st.selectbox(
+    "Select Keyword Extraction Method",
+    ["RAKE (Rule-based)", "YAKE (Rule-based)", "TF-IDF (ML-based)", "Hybrid (Recommended)"]
+)
+
+num = st.slider("Number of keywords", 5, 50, 15)
+
+if st.button("Extract Keywords"):
+    if not text.strip():
+        st.warning("Please enter some text!")
     else:
-        with st.spinner("Extracting keywords..."):
-            if method == "YAKE":
-                kws = yake_extract(doc_text, top_n=num)
-            elif method == "RAKE":
-                kws = rake_extract(doc_text, top_n=num)
-            elif method == "TF-IDF":
-                kws = tfidf_extract(doc_text, top_n=num)
-            elif method == "Rule Frequency":
-                kws = rule_freq_extract(doc_text, top_n=num)
-            else:  # Hybrid
-                kws = hybrid_extract(doc_text, top_n=num)
+        if method == "RAKE (Rule-based)":
+            keywords = rake_extract(text, num)
+        elif method == "YAKE (Rule-based)":
+            keywords = yake_extract(text, num)
+        elif method == "TF-IDF (ML-based)":
+            keywords = tfidf_extract(text, num)
+        else:
+            keywords = hybrid_extract(text, num)
 
-        # display
-        st.markdown("### 🎯 Extracted Keywords")
-        for k in kws:
-            st.markdown(f"<span class='kw'>{k}</span>", unsafe_allow_html=True)
-
-        # provide CSV download
-        df = pd.DataFrame({"keyword": kws})
-        csv = df.to_csv(index=False).encode("utf-8")
-        st.download_button(label="⬇️ Download CSV", data=csv, file_name=f"{download_name}.csv", mime="text/csv")
-
-
+        st.subheader("🔑 Extracted Keywords:")
+        for i, kw in enumerate(keywords, 1):
+            st.write(f"**{i}.** {kw}")
