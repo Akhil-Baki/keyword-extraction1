@@ -2,7 +2,6 @@
 import streamlit as st
 import yake
 from rake_nltk import Rake
-import spacy
 import nltk
 from sklearn.feature_extraction.text import TfidfVectorizer
 from collections import Counter
@@ -16,12 +15,7 @@ import pandas as pd
 nltk.download("punkt")
 nltk.download("stopwords")
 
-# Load spaCy model (ensure installed: python -m spacy download en_core_web_sm)
-try:
-    nlp = spacy.load("en_core_web_sm")
-except Exception:
-    st.error("spaCy model not found. Run: python -m spacy download en_core_web_sm")
-    raise
+
 
 # ---------------------------
 # Extraction Functions
@@ -199,3 +193,4 @@ if st.button("🔍 Extract Keywords"):
         df = pd.DataFrame({"keyword": kws})
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button(label="⬇️ Download CSV", data=csv, file_name=f"{download_name}.csv", mime="text/csv")
+
